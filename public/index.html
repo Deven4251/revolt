@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rev - Revolt Motors Voice Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .logo {
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+
+        .logo p {
+            opacity: 0.8;
+            font-size: 1.1em;
+        }
+
+        .voice-interface {
+            margin: 30px 0;
+        }
+
+        .record-button {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            font-size: 1.2em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+        }
+
+        .record-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.6);
+        }
+
+        .record-button.recording {
+            background: linear-gradient(45deg, #26de81, #20bf6b);
+            animation: pulse 1.5s infinite;
+        }
+
+        .record-button.processing {
+            background: linear-gradient(45deg, #fed330, #f7b731);
+            cursor: not-allowed;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 4px 15px rgba(38, 222, 129, 0.4);
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 6px 25px rgba(38, 222, 129, 0.8);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 4px 15px rgba(38, 222, 129, 0.4);
+            }
+        }
+
+        .status {
+            margin: 20px 0;
+            font-size: 1.1em;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .status.error {
+            color: #ff6b6b;
+        }
+
+        .status.success {
+            color: #26de81;
+        }
+
+        .audio-visualizer {
+            height: 60px;
+            margin: 20px 0;
+            display: flex;
+            align-items: end;
+            justify-content: center;
+            gap: 3px;
+        }
+
+        .bar {
+            width: 4px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 2px;
+            height: 20px;
+            transition: height 0.1s ease;
+        }
+
+        .controls {
+            margin-top: 30px;
+        }
+
+        .control-button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            margin: 0 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .control-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>Rev</h1>
+            <p>Revolt Motors Voice Assistant</p>
+        </div>
+
+        <div class="voice-interface">
+            <button id="recordButton" class="record-button">
+                <span id="buttonText">🎤 Talk</span>
+            </button>
+
+            <div class="audio-visualizer" id="visualizer">
+                <!-- Audio bars will be generated here -->
+            </div>
+
+            <div id="status" class="status">
+                Ready to chat! Press the microphone to start.
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="settingsButton" class="control-button hidden">⚙️ Settings</button>
+            <button id="helpButton" class="control-button">❓ Help</button>
+        </div>
+
+        <audio id="responseAudio" style="display: none;"></audio>
+    </div>
+
+    <script>
+        class RevoltVoiceChat {
+            constructor() {
+                this.ws = null;
+                this.sessionId = null;
+                this.isRecording = false;
+                this.isConnected = false;
+                this.mediaRecorder = null;
+                this.audioContext = null;
+                this.audioChunks = [];
+
+                this.recordButton = document.getElementById('recordButton');
+                this.buttonText = document.getElementById('buttonText');
+                this.status = document.getElementById('status');
+                this.responseAudio = document.getElementById('responseAudio');
+                this.visualizer = document.getElementById('visualizer');
+
+                this.initializeEventListeners();
+                this.createVisualizer();
+                this.connectWebSocket();
+            }
+
+            initializeEventListeners() {
+                this.recordButton.addEventListener('click', () => {
+                    if (this.isRecording) {
+                        this.stopRecording();
+                    } else {
+                        this.startRecording();
+                    }
+                });
+
+                document.getElementById('helpButton').addEventListener('click', () => {
+                    this.showHelp();
+                });
+
+                // Handle spacebar for push-to-talk
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space' && !e.repeat && !this.isRecording) {
+                        e.preventDefault();
+                        this.startRecording();
+                    }
+                });
+
+                document.addEventListener('keyup', (e) => {
+                    if (e.code === 'Space' && this.isRecording) {
+                        e.preventDefault();
+                        this.stopRecording();
+                    }
+                });
+            }
+
+            createVisualizer() {
+                const visualizer = this.visualizer;
+                for (let i = 0; i < 20; i++) {
+                    const bar = document.createElement('div');
+                    bar.className = 'bar';
+                    visualizer.appendChild(bar);
+                }
+            }
+
+            animateVisualizer() {
+                const bars = this.visualizer.querySelectorAll('.bar');
+                bars.forEach(bar => {
+                    const height = Math.random() * 40 + 10;
+                    bar.style.height = height + 'px';
+                });
+            }
+            connectWebSocket() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}`;
+
+                this.ws = new WebSocket(wsUrl);
+
+                this.ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    this.isConnected = true;
+                    this.updateStatus('Connected! Ready to chat.', 'success');
+                    this.startNewSession();
+                };
+
+                this.ws.onmessage = (event) => {
+                    this.handleServerMessage(JSON.parse(event.data));
+                };
+
+                this.ws.onclose = () => {
+                    console.log('WebSocket disconnected');
+                    this.isConnected = false;
+                    this.updateStatus('Connection lost. Attempting to reconnect...', 'error');
+                    setTimeout(() => this.connectWebSocket(), 3000);
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    this.updateStatus('Connection error. Please refresh the page.', 'error');
+                };
+            }
+
+            startNewSession() {
+                this.sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                this.sendMessage({
+                    type: 'start_session',
+                    sessionId: this.sessionId
+                });
+            }
+
+            async startRecording() {
+                if (!this.isConnected) {
+                    this.updateStatus('Not connected to server', 'error');
+                    return;
+                }
+
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: 16000
+                        }
+                    });
+
+                    this.audioContext = new AudioContext({ sampleRate: 16000 });
+                    const source = this.audioContext.createMediaStreamSource(stream);
+
+                    // Create audio processor for real-time streaming
+                    const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+
+                    processor.onaudioprocess = (event) => {
+                        if (this.isRecording) {
+                            const inputData = event.inputBuffer.getChannelData(0);
+                            this.sendAudioChunk(inputData);
+                            this.animateVisualizer();
+                        }
+                    };
+
+                    source.connect(processor);
+                    processor.connect(this.audioContext.destination);
+
+                    this.isRecording = true;
+                    this.updateRecordingUI(true);
+                    this.updateStatus('Listening... You can interrupt me anytime!');
+
+                    // Store references for cleanup
+                    this.currentStream = stream;
+                    this.currentProcessor = processor;
+
+                } catch (error) {
+                    console.error('Error starting recording:', error);
+                    this.updateStatus('Microphone access denied. Please allow microphone access.', 'error');
+                }
+            }
+
+            stopRecording() {
+                if (!this.isRecording) return;
+
+                this.isRecording = false;
+                this.updateRecordingUI(false);
+                this.updateStatus('Processing your message...');
+
+                // Clean up audio resources
+                if (this.currentStream) {
+                    this.currentStream.getTracks().forEach(track => track.stop());
+                }
+                if (this.currentProcessor) {
+                    this.currentProcessor.disconnect();
+                }
+                if (this.audioContext) {
+                    this.audioContext.close();
+                }
+
+                // Send end of audio signal
+                this.sendMessage({
+                    type: 'audio_end',
+                    sessionId: this.sessionId
+                });
+            }
+
+            sendAudioChunk(audioData) {
+                if (!this.isConnected || !this.sessionId) return;
+
+                // Convert Float32Array to 16-bit PCM
+                const pcmData = new Int16Array(audioData.length);
+                for (let i = 0; i < audioData.length; i++) {
+                    pcmData[i] = Math.max(-32768, Math.min(32767, audioData[i] * 32768));
+                }
+
+                // Convert to base64
+                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)));
+
+                this.sendMessage({
+                    type: 'audio_data',
+                    sessionId: this.sessionId,
+                    audio: base64Audio
+                });
+            }
+
+            handleServerMessage(message) {
+                switch (message.type) {
+                    case 'session_started':
+                        console.log('AI session started');
+                        break;
+
+                    case 'audio_response':
+                        this.playAudioResponse(message.audio);
+                        break;
+
+                    case 'interrupted':
+                        this.updateStatus('I was interrupted, please continue...');
+                        break;
+
+                    case 'turn_complete':
+                        this.updateStatus('Ready for your next question!', 'success');
+                        break;
+
+                    case 'error':
+                        this.updateStatus(`Error: ${message.message}`, 'error');
+                        break;
+
+                    case 'session_ended':
+                        this.updateStatus('Session ended. Starting new session...');
+                        setTimeout(() => this.startNewSession(), 1000);
+                        break;
+                }
+            }
+
+            playAudioResponse(base64Audio) {
+                try {
+                    // Convert base64 to audio blob
+                    const binaryString = atob(base64Audio);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    // Create audio blob and play
+                    const audioBlob = new Blob([bytes], { type: 'audio/wav' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+
+                    this.responseAudio.src = audioUrl;
+                    this.responseAudio.play();
+
+                    this.updateStatus('🔊 Rev is speaking...');
+
+                    this.responseAudio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        this.updateStatus('Ready to chat!', 'success');
+                    };
+
+                } catch (error) {
+                    console.error('Error playing audio response:', error);
+                    this.updateStatus('Error playing response', 'error');
+                }
+            }
+
+            sendMessage(message) {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(message));
+                }
+            }
+
+            updateRecordingUI(recording) {
+                if (recording) {
+                    this.recordButton.classList.add('recording');
+                    this.buttonText.textContent = '🔴 Recording';
+                } else {
+                    this.recordButton.classList.remove('recording', 'processing');
+                    this.buttonText.textContent = '🎤 Talk';
+                }
+            }
+
+            updateStatus(message, type = '') {
+                this.status.textContent = message;
+                this.status.className = `status ${type}`;
+            }
+
+            showHelp() {
+                const helpText = `
+Rev - Revolt Motors Voice Assistant
+
+How to use:
+• Click the microphone button or press spacebar to start talking
+• You can interrupt me at any time while I'm speaking
+• Ask me about Revolt electric bikes, pricing, features, or dealerships
+• I can help with RV400, RV1, RV1+, RV BlazeX, and RV400 BRZ
+
+Tips:
+• Speak clearly and at normal volume
+• Use push-to-talk with spacebar for quick interactions
+• I understand multiple languages
+
+Try asking:
+"Tell me about the RV400"
+"What's the price of Revolt bikes?"
+"Where can I find a dealership?"
+                `;
+
+                alert(helpText);
+            }
+        }
+
+        // Initialize the voice chat when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new RevoltVoiceChat();
+        });
+    </script>
+</body>
+</html>
